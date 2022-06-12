@@ -16,68 +16,77 @@ const testnetConfig = {
   explorerUrl: "https://explorer.testnet.near.org",
 }
 
-let near;
-let wallet;
-let status;
-let likelyNFTsContracts;
-let contracts = {};
+let _near;
+let _wallet;
+let _likelyNFTsContracts;
+let _contracts = {};
+let _accToken;
 
 export const util = {
 
     async getLikelyNFTs() {
-        if (!wallet.isSignedIn()) {
+        if (!_wallet.isSignedIn()) {
             return
         }
-        return likelyNFTsContracts
+        return _likelyNFTsContracts
+    },
+
+    setAccountToken(accToken) {
+        _accToken = accToken;
+    },
+
+    getAccountToken() {
+        return _accToken;
     },
 
     getWallet() {
-        return wallet
+        return _wallet
     },
 
     isConnected() {
-        return status
+        return _wallet.isSignedIn()
     },
 
     async signOut() {
-        return await wallet.signOut()
+        return await _wallet.signOut()
     },
 
-    async signIn() {
-        wallet.requestSignIn()
+    async signIn(contractName, methods) {
+        _wallet.requestSignIn({contractId: contractName, methodNames: methods})
+        // , successUrl: 'https://webhook.site/aa398144-e525-43c9-b907-87ae071b5614'})
     },
 
     async connectLikelyNFTs() {
-        const url = 'https://helper.testnet.near.org/account/{0}/likelyNFTs'.replace('{0}', wallet.getAccountId())
-        const res = await fetch(url)
-        console.log(res)
-        return await res.json();
+        // const url = 'https://helper.testnet.near.org/account/{0}/likelyNFTs'.replace('{0}', _wallet.getAccountId())
+        // const res = await fetch(url)
+        // console.log(res)
+        // return await res.json();
     },
 
     async init() {
-        near = await connect(testnetConfig)
-        wallet = new WalletConnection(near)
-        status = wallet.isSignedIn()
-        if (wallet.isSignedIn()) {
-            likelyNFTsContracts = await this.connectLikelyNFTs()
-        }
+        _near = await connect(testnetConfig)
+        _wallet = new WalletConnection(_near)
     },
 
     async connectContract(contractName, viewMethods, changeMethods) {
-        contracts[contractName] = await new nearApi.Contract(
-            wallet.account(), // the account object that is connecting
+        _contracts[contractName] = await new nearApi.Contract(
+            _wallet.account(), // the account object that is connecting
             contractName,
             {
                 // name of contract you're connecting to
                 viewMethods: viewMethods, // view methods do not change state but usually return a value
                 changeMethods: changeMethods, // change methods modify state
-                sender: wallet.account(), // account object to initialize and sign transactions.
+                sender: _wallet.account(), // account object to initialize and sign transactions.
             }
         );
     },
 
+    isContractConnected(contractName) {
+        return _contracts[contractName] !== undefined
+    }, 
+
     async call(contractName, method, args) {
-        return await contracts[contractName][method](...args)
+        return await _contracts[contractName][method](...args)
     }
 
 }

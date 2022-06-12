@@ -8,6 +8,7 @@ edition = "2018"
 near-sdk = "4.0.0-pre.6"
 near-sdk-sim = "4.0.0-pre.6"
 near-contract-standards = "4.0.0-pre.7"
+hex = "0.4.3"
 
 # remember to include a line for each contract
 secret-letter-contract = { path = "./nft" }

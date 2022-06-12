@@ -25,7 +25,7 @@ use near_sdk::collections::{ LazyOption, UnorderedMap };
 use near_sdk::{
     env, near_bindgen, ext_contract, log, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue, Balance, PromiseResult, Gas
 };
-
+use hex;
 
 // near_sdk::setup_alloc!();
 
@@ -33,11 +33,14 @@ use near_sdk::{
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
     id: u128,
-    token_to_creator: UnorderedMap<u128, AccountId>,
+    aid: u32,
+    account_to_aid: UnorderedMap<AccountId, u32>,
+    aid_to_account: UnorderedMap<u32, AccountId>,
+    token_to_creator: UnorderedMap<u128, u32>,
     tokens: NonFungibleToken,
     metadata: LazyOption<NFTContractMetadata>,
     secret_message: UnorderedMap<u128, String>,
-    account_password: UnorderedMap<AccountId, String>,
+    aid_to_access_token: UnorderedMap<u32, String>,
 }
 
 const DATA_IMAGE_SVG_NEAR_ICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 288 288'%3E%3Cg id='l' data-name='l'%3E%3Cpath d='M187.58,79.81l-30.1,44.69a3.2,3.2,0,0,0,4.75,4.2L191.86,103a1.2,1.2,0,0,1,2,.91v80.46a1.2,1.2,0,0,1-2.12.77L102.18,77.93A15.35,15.35,0,0,0,90.47,72.5H87.34A15.34,15.34,0,0,0,72,87.84V201.16A15.34,15.34,0,0,0,87.34,216.5h0a15.35,15.35,0,0,0,13.08-7.31l30.1-44.69a3.2,3.2,0,0,0-4.75-4.2L96.14,186a1.2,1.2,0,0,1-2-.91V104.61a1.2,1.2,0,0,1,2.12-.77l89.55,107.23a15.35,15.35,0,0,0,11.71,5.43h3.13A15.34,15.34,0,0,0,216,201.16V87.84A15.34,15.34,0,0,0,200.66,72.5h0A15.35,15.35,0,0,0,187.58,79.81Z'/%3E%3C/g%3E%3C/svg%3E";
@@ -61,8 +64,8 @@ impl Contract {
             owner_id,
             NFTContractMetadata {
                 spec: NFT_METADATA_SPEC.to_string(),
-                name: "Help Ukraine Zoo".to_string(),
-                symbol: "KT-NEAR".to_string(),
+                name: "Secret Letter".to_string(),
+                symbol: "SL-NEAR".to_string(),
                 icon: Some(DATA_IMAGE_SVG_NEAR_ICON.to_string()),
                 base_uri: None,
                 reference: None,
@@ -77,7 +80,10 @@ impl Contract {
         metadata.assert_valid();
         Self {
             id: 0,
-            token_to_creator: UnorderedMap::new(b"t"),
+            aid: 0,
+            account_to_aid: UnorderedMap::new(b"a"),
+            aid_to_account: UnorderedMap::new(b"n"),
+            token_to_creator: UnorderedMap::new(b"c"),
             tokens: NonFungibleToken::new(
                 StorageKey::NonFungibleToken,
                 owner_id,
@@ -86,41 +92,100 @@ impl Contract {
                 Some(StorageKey::Approval),
             ),
             metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
-            secret_message: UnorderedMap::new(b"l"), 
-            account_password: UnorderedMap::new(b"p"), 
+            secret_message: UnorderedMap::new(b"m"), 
+            aid_to_access_token: UnorderedMap::new(b"p"), 
         }
     }
 
+    pub fn get_access_token(&mut self) -> Option<String> {
+        log!("predecessor_account_id {}", &env::predecessor_account_id());
+        if self.account_to_aid.get(&env::predecessor_account_id()).is_none() {
+            self.aid_to_account.insert(&self.aid, &env::predecessor_account_id());
+            self.account_to_aid.insert(&env::predecessor_account_id(), &self.aid);
+            self.aid = self.aid + 1;
+        }
+        let mut access_token : Option<String> = self.aid_to_access_token.get(&self.get_aid(env::predecessor_account_id()));
+        match access_token {
+            None => {
+                let test : String = env::block_timestamp().to_string();
+                log!("test {}, access id none", test);
+                access_token =  hex::encode(&env::sha256(&env::block_timestamp().to_be_bytes())).get(0..8).map(|s| format!("{}", s));
+                log!("test hash {:?}", env::sha256(&env::block_timestamp().to_be_bytes()));
+                log!("test hash string {:?}", hex::encode(&env::sha256(&env::block_timestamp().to_be_bytes())).get(0..8).map(|s| format!("{}", s)));
+                log!("access_token {:?}", &access_token.as_ref());
+                self.aid_to_access_token.insert(&self.get_aid(env::predecessor_account_id()), &access_token.as_ref().unwrap());
+            },
+            _ => {
+                log!("access_token is {:?}", access_token.as_ref());
+            }
+        }
+        access_token
+    }
+
+    pub fn remove_access_token(&mut self) {
+        self.aid_to_access_token.remove(&self.get_aid(env::predecessor_account_id()));
+    }        
+
+    // deprecated
     pub fn set_password(&mut self, password: String) {
-        self.account_password.insert(&env::predecessor_account_id(), &password);
+        self.aid_to_access_token.insert(&self.get_aid(env::predecessor_account_id()), &password);
     }
 
     pub fn get_creator_id(&self, token_id: u128) -> Option<AccountId> {
-        self.token_to_creator.get(&token_id)
+        self.aid_to_account.get(&self.token_to_creator.get(&token_id).unwrap())
     }
 
     pub fn get_sequence(&self, token_id: u128) -> u128 {
         self.id
     }
 
-    pub fn read_message(&self, token_id: u128, account: AccountId, password: String) -> String {
-        if self.account_password.get(&account) == None {
-            return "Please set the password first".to_string();
+    pub fn get_aid(&self, account: AccountId) -> u32 {
+        return self.account_to_aid.get(&account).unwrap();
+    }
+
+    pub fn get_access_token_by_aid(&self) -> Option<String> {
+        return self.aid_to_access_token.get(&self.get_aid(env::predecessor_account_id()));
+    }
+
+    pub fn read_message(&self, token_id: u128, account: AccountId, access_token_input: String) -> String {
+        let aid = self.get_aid(account.clone());
+        let access_token = self.aid_to_access_token.get(&aid);
+        match access_token {
+            None => {
+                "Secret Letter: Please get the access_token first".to_string()
+            },
+            Some(access_token_input) => {
+                let owner_id = self.tokens.owner_by_id.get(&token_id.to_string());
+                match self.tokens.owner_by_id.get(&token_id.to_string()) {
+                    None => {
+                        log!("token_id {}, owner_by token_id {:?}, account {}", token_id, owner_id, account);
+                        "Invalid token id!".to_string()
+                    },
+                    Some(account) => {
+                        self.secret_message.get(&token_id).unwrap().to_string()
+                    },
+                    _ => {
+                        log!("token_id {}, owner_by token_id {:?}, account {}", token_id, owner_id, account);
+                        "Secret Letter: Only the holder can read the message".to_string() 
+                    }
+                }
+            },
+            _ => {
+                log!("token_id {}, access_token store {:?}, access_token {}", token_id, access_token, access_token_input);
+                "Secret Letter: Password wrong, cannot read the message".to_string()
+            }
         }
-        if self.account_password.get(&account).unwrap() != password {
-            return "Password wrong, cannot read the message".to_string();
-        }
-        self.secret_message.get(&token_id).unwrap().to_string()
     }
 
     pub fn set_message(&mut self, token_id: u128, message: String) -> String {
-        if self.token_to_creator.get(&token_id).unwrap() != env::predecessor_account_id() {
+        if self.token_to_creator.get(&token_id).unwrap() != self.get_aid(env::predecessor_account_id()) {
             return "only owner can set the message".to_string();
         }
         self.secret_message.insert(&token_id, &message);
         "setting message completed".to_string()
     }
 
+    #[payable]
     pub fn nft_mint(&mut self, message : Option<String>) -> Token{
         let amount: Balance = near_sdk::env::attached_deposit();
         log!("attach money is {}, singer_account_id {}, predecessor_account_id {}", amount, env::signer_account_id(), env::predecessor_account_id());
@@ -142,7 +207,7 @@ impl Contract {
             }),
             None
         );
-        self.token_to_creator.insert(&token_id, &env::predecessor_account_id());
+        self.token_to_creator.insert(&token_id, &self.get_aid(env::predecessor_account_id()));
         self.secret_message.insert(&token_id, &message.unwrap());
         self.id = self.id + 1;
         token
@@ -193,6 +258,11 @@ mod tests {
             reference: None,
             reference_hash: None,
         }
+    }
+
+    #[test]
+    fn test_random_seed() {
+        log!("{}", env::random_seed().get(..16).unwrap().to_vec());
     }
 
     #[test]

@@ -12,3 +12,4 @@ near-sdk = "4.0.0-pre.7"
 near-contract-standards = "4.0.0-pre.7"
 rand = "0.8.4"
 getrandom = { version = "0.2", features = ["js"] }
+hex = "0.4.3"
